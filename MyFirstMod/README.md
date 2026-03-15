@@ -39,22 +39,19 @@ dotnet build
 
 ## 版本管理
 
-项目中有**两个清单文件**，发布新版本时需要**同步更新**：
+只需要修改 **`MyFirstMod.json`** 中的 `version` 字段，构建时会自动完成以下操作：
 
-| 文件 | 用途 | 被谁读取 |
-|---|---|---|
-| `MyFirstMod.json` | 构建时复制到 mods 目录 | csproj 构建脚本 |
-| `mod_manifest.json` | 打包进 `.pck` 内部 | 游戏 `ModManager` |
+1. 从 `MyFirstMod.json` 读取 `version`，生成带版本号的输出文件夹（如 `MyFirstMod-v0.1.0/`）
+2. 在 `dotnet publish` 时自动生成 `mod_manifest.json`（打包进 `.pck`，供游戏读取）
 
-两者的 `version` 字段应保持一致，推荐使用语义化版本（如 `v1.0.0`）。
+推荐使用语义化版本（如 `v1.0.0`）。
 
 ## 项目结构
 
 ```
 .
 ├── MainFile.cs            # mod 入口（初始化、延迟修改游戏模型）
-├── mod_manifest.json      # pck 内清单（pck_name/name/version，游戏靠它识别 mod）
-├── MyFirstMod.json        # 构建清单（复制到 mods 目录）
+├── MyFirstMod.json        # 唯一的元信息文件（版本号、作者、描述等）
 ├── MyFirstMod.csproj      # C# 项目配置（依赖、路径、构建流程）
 ├── MyFirstMod.sln         # VS/Rider 解决方案文件
 ├── MyFirstMod/
@@ -68,7 +65,7 @@ dotnet build
 ## 日常开发你只需关心这几个文件
 
 - **`MainFile.cs`** — 写 mod 逻辑（游戏模型修改、事件订阅等）
-- **`MyFirstMod.json`** + **`mod_manifest.json`** — 更新版本号、描述等元信息
+- **`MyFirstMod.json`** — 更新版本号、描述等元信息（`mod_manifest.json` 构建时自动生成）
 - **`MyFirstMod/`** — 放 Godot 资源（图片、场景、本地化文件等）
 
 ## macOS 路径配置
@@ -86,8 +83,8 @@ dotnet build
 
 ## 构建流程（自动执行）
 
-1. `dotnet build` → 编译 C# → 生成 `MyFirstMod.dll` → 连同 `MyFirstMod.json` 复制到游戏 mods 目录
-2. `dotnet publish` → 在 build 基础上额外调用 MegaDot 导出 `.pck` 资源包到 mods 目录
+1. `dotnet build` → 编译 C# → 生成 `MyFirstMod.dll` → 连同 `MyFirstMod.json` 复制到 `mods/MyFirstMod-<版本号>/`
+2. `dotnet publish` → 在 build 基础上额外调用 MegaDot 导出 `.pck` 资源包到同一目录
 
 ## 技术栈
 
@@ -112,8 +109,8 @@ dotnet build
 
 ### 2. 需要 `mod_manifest.json` 打包进 `.pck`
 
-游戏从 `.pck` 内部读取 `res://mod_manifest.json`（字段为 `pck_name`/`name`/`author`/`version`），
-和项目根目录的 `MyFirstMod.json`（构建清单）是**两个独立文件**。
+游戏从 `.pck` 内部读取 `res://mod_manifest.json`（字段为 `pck_name`/`name`/`author`/`version`）。
+构建脚本会在 `dotnet publish` 时自动从 `MyFirstMod.json` 生成此文件，无需手动维护。
 
 ### 3. macOS Mods 路径是 `Contents/MacOS/mods/`
 

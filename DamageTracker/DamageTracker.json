@@ -1,0 +1,11 @@
+{
+  "id": "DamageTracker",
+  "name": "Damage Tracker",
+  "author": "MyName",
+  "description": "Track and display per-player damage stats after each combat",
+  "version": "v0.1.0",
+  "has_pck": true,
+  "has_dll": true,
+  "dependencies": [],
+  "affects_gameplay": false
+}

@@ -1,0 +1,15 @@
+.godot/
+bin/
+/android/
+.git/
+.idea/
+.vs/
+publish/
+Properties/
+packages/
+.editorconfig
+*cs.uid
+*.user
+
+# 构建时自动生成（从 DamageTracker.json → mod_manifest.json）
+mod_manifest.json

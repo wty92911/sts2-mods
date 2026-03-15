@@ -1,0 +1,185 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1" InitialTargets="CheckDependencyPaths">
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>true</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <DefaultItemExcludes>packages/**</DefaultItemExcludes>
+        <AppOutputBase>$(MSBuildProjectDirectory)\</AppOutputBase>
+        <PathMap>$(AppOutputBase)=.\</PathMap>
+    </PropertyGroup>
+
+    <!-- OS Detection -->
+    <PropertyGroup>
+        <IsWindows>false</IsWindows>
+        <IsLinux>false</IsLinux>
+        <IsOSX>false</IsOSX>
+        <IsWindows Condition="$([MSBuild]::IsOSPlatform('Windows'))">true</IsWindows>
+        <IsLinux Condition="$([MSBuild]::IsOSPlatform('Linux'))">true</IsLinux>
+        <IsOSX Condition="$([MSBuild]::IsOSPlatform('OSX'))">true</IsOSX>
+    </PropertyGroup>
+
+    <!-- Windows -->
+    <PropertyGroup Condition="'$(IsWindows)' == 'true'">
+        <AutoSteamPath>$(registry:HKEY_CURRENT_USER\Software\Valve\Steam@SteamPath)\steamapps</AutoSteamPath>
+        <SteamLibraryPath Condition="Exists('$(AutoSteamPath)/common/Slay the Spire 2')">$(AutoSteamPath)</SteamLibraryPath>
+        <GodotPath>C:/megadot/MegaDot_v4.5.1-stable_mono_win64.exe</GodotPath>
+        <SteamLibraryPath Condition="'$(SteamLibraryPath)' == ''">C:/Program Files (x86)/Steam/steamapps</SteamLibraryPath>
+        <Sts2Path>$(SteamLibraryPath)/common/Slay the Spire 2</Sts2Path>
+        <ModsPath>$(Sts2Path)/mods/</ModsPath>
+        <Sts2DataDir>$(Sts2Path)/data_sts2_windows_x86_64</Sts2DataDir>
+    </PropertyGroup>
+
+    <!-- Linux -->
+    <PropertyGroup Condition="'$(IsLinux)' == 'true'">
+        <SteamLibraryPath>$(HOME)/.local/share/Steam/steamapps</SteamLibraryPath>
+        <GodotPath>$(SteamLibraryPath)/common/Godot Engine/godot.x11.opt.tools.64</GodotPath>
+        <Sts2Path>$(SteamLibraryPath)/common/Slay the Spire 2</Sts2Path>
+        <ModsPath>$(Sts2Path)/mods/</ModsPath>
+        <Sts2DataDir>$(Sts2Path)/data_sts2_linuxbsd_x86_64</Sts2DataDir>
+    </PropertyGroup>
+
+    <!-- macOS -->
+    <PropertyGroup Condition="'$(IsOSX)' == 'true'">
+        <SteamLibraryPath>$(HOME)/Library/Application Support/Steam/steamapps</SteamLibraryPath>
+        <GodotPath>$(HOME)/Applications/Godot_mono.app/Contents/MacOS/Godot</GodotPath>
+        <Sts2Path>$(SteamLibraryPath)/common/Slay the Spire 2</Sts2Path>
+        <ModsPath>$(Sts2Path)/SlayTheSpire2.app/Contents/MacOS/mods/</ModsPath>
+        <Sts2DataDir>$(Sts2Path)/SlayTheSpire2.app/Contents/Resources/data_sts2_macos_arm64</Sts2DataDir>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <NoWarn>$(NoWarn);MSB3270</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup Condition="Exists('$(Sts2DataDir)')">
+        <Reference Include="0Harmony">
+            <HintPath>$(Sts2DataDir)/0Harmony.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="sts2">
+            <HintPath>$(Sts2DataDir)/sts2.dll</HintPath>
+            <Private>false</Private>
+            <Publicize>False</Publicize>
+        </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Alchyr.Sts2.ModAnalyzers" Version="*" />
+        <AdditionalFiles Include="DamageTracker/localization/**/*.json"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Compile Remove="DamageTracker/**" />
+        <Compile Remove="materials/**" />
+        <Compile Remove="shaders/**" />
+        <Compile Remove="images/**" />
+        <EmbeddedResource Remove="DamageTracker/**" />
+        <EmbeddedResource Remove="materials/**" />
+        <EmbeddedResource Remove="shaders/**" />
+        <EmbeddedResource Remove="images/**" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include=".gitignore" />
+        <None Include="DamageTracker.json" />
+        <None Include="project.godot"/>
+        <None Include="DamageTracker/**" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <!-- ── Inline task: read a string value from a flat JSON file ── -->
+    <UsingTask TaskName="ReadJsonProperty" TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <JsonFile ParameterType="System.String" Required="true" />
+            <Key ParameterType="System.String" Required="true" />
+            <Value ParameterType="System.String" Output="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System.Text.RegularExpressions" />
+            <Code Type="Fragment" Language="cs">
+                var json = File.ReadAllText(JsonFile);
+                var m = Regex.Match(json, "\"" + Key + "\"\\s*:\\s*\"([^\"]+)\"");
+                Value = m.Success ? m.Groups[1].Value : "";
+            </Code>
+        </Task>
+    </UsingTask>
+
+    <!-- ── Inline task: generate mod_manifest.json from the build manifest ── -->
+    <UsingTask TaskName="GenerateModManifest" TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <SourceJson ParameterType="System.String" Required="true" />
+            <OutputJson ParameterType="System.String" Required="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System.Text.RegularExpressions" />
+            <Code Type="Fragment" Language="cs">
+                var json = File.ReadAllText(SourceJson);
+                string Get(string k) {
+                    var m = Regex.Match(json, "\"" + k + "\"\\s*:\\s*\"([^\"]+)\"");
+                    return m.Success ? m.Groups[1].Value : "";
+                }
+                var output =
+                    "{\n" +
+                    "  \"pck_name\": \"" + Get("id") + "\",\n" +
+                    "  \"name\": \"" + Get("name") + "\",\n" +
+                    "  \"author\": \"" + Get("author") + "\",\n" +
+                    "  \"description\": \"" + Get("description") + "\",\n" +
+                    "  \"version\": \"" + Get("version") + "\"\n" +
+                    "}\n";
+                File.WriteAllText(OutputJson, output);
+            </Code>
+        </Task>
+    </UsingTask>
+
+    <!-- ── Read version from build manifest → set ModOutputName ── -->
+    <Target Name="ReadModMetadata" BeforeTargets="CopyToModsFolderOnBuild;GodotPublish">
+        <ReadJsonProperty JsonFile="$(MSBuildProjectName).json" Key="version">
+            <Output TaskParameter="Value" PropertyName="ModVersion" />
+        </ReadJsonProperty>
+        <PropertyGroup>
+            <ModOutputName>$(MSBuildProjectName)-$(ModVersion)</ModOutputName>
+        </PropertyGroup>
+        <Message Text="Mod version: $(ModVersion) → output folder: $(ModOutputName)/" Importance="high" />
+    </Target>
+
+    <!-- ── Auto-generate mod_manifest.json before Godot export ── -->
+    <Target Name="GenerateModManifestFile" BeforeTargets="GodotPublish">
+        <GenerateModManifest SourceJson="$(MSBuildProjectName).json" OutputJson="mod_manifest.json" />
+        <Message Text="Generated mod_manifest.json from $(MSBuildProjectName).json" Importance="high" />
+    </Target>
+
+    <Target Name="CheckDependencyPaths">
+        <Error
+                Text=" Slay the Spire 2 data not found at path '$(Sts2DataDir)'"
+                Condition="'$(Sts2DataDir)' == '' or !Exists('$(Sts2DataDir)')" />
+        <Error
+                Text=" Godot not found at path '$(GodotPath)'"
+                Condition="'$(GodotPath)' == '' or !Exists('$(GodotPath)')" />
+    </Target>
+
+    <Target Name="CopyToModsFolderOnBuild" AfterTargets="PostBuildEvent" Condition="'$(IsInnerGodotExport)' != 'true'">
+        <Message Text="Copying .dll and manifest to $(ModOutputName)/" Importance="high" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsPath)$(ModOutputName)/" />
+        <Copy SourceFiles="$(MSBuildProjectName).json" DestinationFolder="$(ModsPath)$(ModOutputName)/" />
+    </Target>
+
+    <Target Name="GodotPublish" AfterTargets="Publish" Condition="'$(GodotPath)' != '' and Exists('$(GodotPath)') and '$(IsInnerGodotExport)' != 'true'">
+        <Message Text="Exporting Godot .pck to $(ModOutputName)/" Importance="high"/>
+        <Exec Command="&quot;$(GodotPath)&quot; --headless --export-pack &quot;BasicExport&quot; &quot;$(ModsPath)$(ModOutputName)/$(MSBuildProjectName).pck&quot;"
+              EnvironmentVariables="IsInnerGodotExport=true;MSBUILDDISABLENODEREUSE=1"
+              ContinueOnError="WarnAndContinue"/>
+    </Target>
+
+    <Target Name="GodotPublishSkipped" AfterTargets="Publish" Condition="'$(GodotPath)' == '' or !Exists('$(GodotPath)')">
+        <Message Text="Skipping Godot .pck export because GodotPath is not configured." Importance="high"/>
+    </Target>
+</Project>

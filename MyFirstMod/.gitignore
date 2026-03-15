@@ -1,0 +1,18 @@
+.godot/
+bin/
+/android/
+.git/
+.idea/
+.vs/
+publish/
+Properties/
+packages/
+.editorconfig
+*cs.uid
+*.user
+
+# 构建时自动生成（从 MyFirstMod.json → mod_manifest.json）
+mod_manifest.json
+
+# 参考用的第三方 mod（不纳入版本控制）
+STS2RouteSuggest/
