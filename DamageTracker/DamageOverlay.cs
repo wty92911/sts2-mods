@@ -15,6 +15,7 @@ public partial class DamageOverlay : CanvasLayer
     static readonly Color LiveNameColor = new(0.82f, 0.82f, 0.88f);
     static readonly Color DmgColor = new(1f, 0.4f, 0.35f);
     static readonly Color DmgCumulativeColor = new(1f, 0.65f, 0.25f);
+    static readonly Color IndirectColor = new(0.6f, 0.3f, 0.8f);
     static readonly Color KillColor = new(0.55f, 0.55f, 0.6f);
 
     readonly PanelContainer _livePanel;
@@ -60,6 +61,8 @@ public partial class DamageOverlay : CanvasLayer
                 name.CustomMinimumSize = new Vector2(multiplayer ? 160 : 90, 0);
                 row.AddChild(name);
                 row.AddChild(MakeLabel($"{s.Damage:N0}", 13, DmgColor));
+                if (s.IndirectDamage > 0)
+                    row.AddChild(MakeLabel($"☠{s.IndirectDamage:N0}", 11, IndirectColor));
                 if (s.Kills > 0)
                     row.AddChild(MakeLabel($"💀{s.Kills}", 11, KillColor));
                 _liveContent.AddChild(row);
@@ -86,7 +89,7 @@ public partial class DamageOverlay : CanvasLayer
                 foreach (var s in combat)
                 {
                     string name = FormatPlayerName(s.DisplayName, s.CharacterClass, multiplayer);
-                    AddPlayerRow(_summaryContent, name, s.Damage, s.Kills, false);
+                    AddPlayerRow(_summaryContent, name, s.Damage, s.IndirectDamage, s.Kills, false);
                 }
             }
 
@@ -99,7 +102,7 @@ public partial class DamageOverlay : CanvasLayer
                 foreach (var s in run)
                 {
                     string name = FormatPlayerName(s.DisplayName, s.CharacterClass, multiplayer);
-                    AddPlayerRow(_summaryContent, name, s.Damage, s.Kills, true);
+                    AddPlayerRow(_summaryContent, name, s.Damage, s.IndirectDamage, s.Kills, true);
                 }
             }
         });
@@ -121,7 +124,7 @@ public partial class DamageOverlay : CanvasLayer
         return multiplayer ? $"{displayName} · {charClass}" : charClass;
     }
 
-    void AddPlayerRow(VBoxContainer target, string name, int damage, int kills, bool cumulative)
+    void AddPlayerRow(VBoxContainer target, string name, int damage, int indirectDamage, int kills, bool cumulative)
     {
         var row = MakeRow(10);
 
@@ -132,6 +135,9 @@ public partial class DamageOverlay : CanvasLayer
         row.AddChild(MakeLabel(
             $"{damage:N0}", 15,
             cumulative ? DmgCumulativeColor : DmgColor));
+
+        if (indirectDamage > 0)
+            row.AddChild(MakeLabel($"☠{indirectDamage:N0}", 13, IndirectColor));
 
         if (kills > 0)
             row.AddChild(MakeLabel($"💀{kills}", 13, KillColor));

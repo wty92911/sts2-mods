@@ -3,7 +3,7 @@
   "name": "Damage Tracker",
   "author": "MyName",
   "description": "Track and display per-player damage stats after each combat",
-  "version": "v0.1.1",
+  "version": "v0.1.2",
   "has_pck": true,
   "has_dll": true,
   "dependencies": [],

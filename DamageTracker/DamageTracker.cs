@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Combat.History;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -21,6 +22,7 @@ public record PlayerCombatStats(
     string CharacterClass,
     int Damage,
     int Blocked,
+    int IndirectDamage,
     int Kills);
 
 public class PlayerRunStats
@@ -29,6 +31,7 @@ public class PlayerRunStats
     public string CharacterClass { get; set; } = "";
     public int Damage { get; set; }
     public int Blocked { get; set; }
+    public int IndirectDamage { get; set; }
     public int Kills { get; set; }
     public int Combats { get; set; }
 }
@@ -40,6 +43,7 @@ public class SavedEntry
     public string CharacterClass { get; set; } = "";
     public int Damage { get; set; }
     public int Blocked { get; set; }
+    public int IndirectDamage { get; set; }
     public int Kills { get; set; }
     public int Combats { get; set; }
 }
@@ -139,6 +143,7 @@ public static class DamageTrackerMod
             if (!inCombat && _wasInCombat)
             {
                 Log.Info($"[{ModId}] Combat ended.");
+                DumpHistoryEntries(cm.History);
                 ProcessCombatEnd();
             }
 
@@ -164,6 +169,46 @@ public static class DamageTrackerMod
         catch { return false; }
     }
 
+    static void DumpHistoryEntries(CombatHistory history)
+    {
+        try
+        {
+            var entries = history.Entries.ToList();
+            Log.Info($"[{ModId}] === HISTORY DUMP: {entries.Count} entries ===");
+
+            foreach (var entry in entries)
+            {
+                switch (entry)
+                {
+                    case DamageReceivedEntry dre:
+                        var dealer = dre.Dealer;
+                        string dealerInfo = dealer == null ? "null"
+                            : $"{dealer.Name}(IsPlayer={dealer.IsPlayer}, IsPet={dealer.IsPet}, Side={dealer.Side})";
+                        var recv = dre.Result.Receiver;
+                        string recvInfo = recv == null ? "null"
+                            : $"{recv.Name}(IsPlayer={recv.IsPlayer}, Side={recv.Side})";
+                        Log.Info($"[{ModId}]   DMG: dealer={dealerInfo} → receiver={recvInfo} total={dre.Result.TotalDamage} blocked={dre.Result.BlockedDamage} killed={dre.Result.WasTargetKilled} card={dre.CardSource?.Title ?? "none"}");
+                        break;
+
+                    case PowerReceivedEntry pre:
+                        string applierInfo = pre.Applier == null ? "null"
+                            : $"{pre.Applier.Name}(IsPlayer={pre.Applier.IsPlayer}, IsPet={pre.Applier.IsPet})";
+                        Log.Info($"[{ModId}]   PWR: {pre.Power?.GetType().Name ?? "?"} amount={pre.Amount} applier={applierInfo} actor={pre.Actor?.Name ?? "null"}");
+                        break;
+
+                    default:
+                        Log.Info($"[{ModId}]   {entry.GetType().Name}: actor={entry.Actor?.Name ?? "null"}");
+                        break;
+                }
+            }
+            Log.Info($"[{ModId}] === END DUMP ===");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[{ModId}] DumpHistory error: {ex.Message}");
+        }
+    }
+
     static Player? ResolveOwnerPlayer(Creature? dealer)
     {
         if (dealer == null) return null;
@@ -172,28 +217,105 @@ public static class DamageTrackerMod
         return null;
     }
 
+    static Dictionary<ulong, int> CollectDoomDamage()
+    {
+        var result = new Dictionary<ulong, int>();
+        foreach (var pre in CombatManager.Instance.History.Entries.OfType<PowerReceivedEntry>())
+        {
+            if (pre.Power?.GetType().Name != "DoomPower") continue;
+            if (pre.Amount <= 0) continue;
+
+            var owner = ResolveOwnerPlayer(pre.Applier);
+            if (owner == null) continue;
+
+            result.TryGetValue(owner.NetId, out int existing);
+            result[owner.NetId] = existing + (int)pre.Amount;
+        }
+        return result;
+    }
+
+    static (int totalPoisonDmg, HashSet<ulong> poisonPlayerIds) CollectPoisonInfo()
+    {
+        var history = CombatManager.Instance.History.Entries;
+
+        int totalPoison = history
+            .OfType<DamageReceivedEntry>()
+            .Where(e => e.Dealer == null && e.Receiver is { IsMonster: true })
+            .Sum(e => e.Result.TotalDamage);
+
+        var playerIds = new HashSet<ulong>();
+        foreach (var pre in history.OfType<PowerReceivedEntry>())
+        {
+            if (pre.Power?.GetType().Name != "PoisonPower") continue;
+            if (pre.Amount <= 0) continue;
+            var owner = ResolveOwnerPlayer(pre.Applier);
+            if (owner != null) playerIds.Add(owner.NetId);
+        }
+
+        return (totalPoison, playerIds);
+    }
+
     static List<PlayerCombatStats> CollectCurrentStats()
     {
-        return CombatManager.Instance.History.Entries
+        var history = CombatManager.Instance.History.Entries;
+        var doomByPlayer = CollectDoomDamage();
+        var (totalPoisonDmg, poisonPlayerIds) = CollectPoisonInfo();
+
+        int poisonShare = poisonPlayerIds.Count > 0
+            ? totalPoisonDmg / poisonPlayerIds.Count
+            : 0;
+
+        var damageStats = history
             .OfType<DamageReceivedEntry>()
             .Select(e => (Entry: e, Owner: ResolveOwnerPlayer(e.Dealer)))
             .Where(x => x.Owner != null)
             .GroupBy(x => x.Owner!.NetId)
-            .Select(g =>
+            .ToDictionary(g => g.Key, g => g);
+
+        var allPlayerIds = damageStats.Keys
+            .Union(doomByPlayer.Keys)
+            .Union(poisonPlayerIds)
+            .ToHashSet();
+
+        return allPlayerIds
+            .Select(netId =>
             {
-                var owner = g.First().Owner!;
-                string displayName = owner.Creature?.Name ?? "???";
-                string charClass;
-                try { charClass = owner.Character.Title.GetFormattedText(); }
-                catch { charClass = owner.Character.Id.Entry; }
+                Player? owner = null;
+                string displayName = "???";
+                string charClass = "???";
+                int damage = 0, blocked = 0, kills = 0;
+
+                if (damageStats.TryGetValue(netId, out var group))
+                {
+                    owner = group.First().Owner;
+                    damage = group.Sum(x => x.Entry.Result.TotalDamage);
+                    blocked = group.Sum(x => x.Entry.Result.BlockedDamage);
+                    kills = group.Count(x => x.Entry.Result.WasTargetKilled);
+                }
+
+                if (owner == null)
+                {
+                    foreach (var pre in history.OfType<PowerReceivedEntry>())
+                    {
+                        var o = ResolveOwnerPlayer(pre.Applier);
+                        if (o?.NetId == netId) { owner = o; break; }
+                    }
+                }
+
+                if (owner != null)
+                {
+                    displayName = owner.Creature?.Name ?? "???";
+                    try { charClass = owner.Character.Title.GetFormattedText(); }
+                    catch { charClass = owner.Character.Id.Entry; }
+                }
+
+                doomByPlayer.TryGetValue(netId, out int doom);
+                int poison = poisonPlayerIds.Contains(netId) ? poisonShare : 0;
+                int indirect = doom + poison;
 
                 return new PlayerCombatStats(
-                    g.Key,
-                    displayName,
-                    charClass,
-                    g.Sum(x => x.Entry.Result.TotalDamage),
-                    g.Sum(x => x.Entry.Result.BlockedDamage),
-                    g.Count(x => x.Entry.Result.WasTargetKilled));
+                    netId, displayName, charClass,
+                    damage + indirect, blocked, indirect, kills);
             })
             .OrderByDescending(s => s.Damage)
             .ToList();
@@ -219,6 +341,7 @@ public static class DamageTrackerMod
                 rs.CharacterClass = s.CharacterClass;
                 rs.Damage += s.Damage;
                 rs.Blocked += s.Blocked;
+                rs.IndirectDamage += s.IndirectDamage;
                 rs.Kills += s.Kills;
                 rs.Combats++;
             }
@@ -253,6 +376,7 @@ public static class DamageTrackerMod
                 CharacterClass = kvp.Value.CharacterClass,
                 Damage = kvp.Value.Damage,
                 Blocked = kvp.Value.Blocked,
+                IndirectDamage = kvp.Value.IndirectDamage,
                 Kills = kvp.Value.Kills,
                 Combats = kvp.Value.Combats,
             }).ToList();
@@ -286,6 +410,7 @@ public static class DamageTrackerMod
                     CharacterClass = e.CharacterClass,
                     Damage = e.Damage,
                     Blocked = e.Blocked,
+                    IndirectDamage = e.IndirectDamage,
                     Kills = e.Kills,
                     Combats = e.Combats,
                 };
