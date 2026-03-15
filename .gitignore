@@ -10,3 +10,6 @@ packages/
 .editorconfig
 *cs.uid
 *.user
+
+# 参考用的第三方 mod（不纳入版本控制）
+STS2RouteSuggest/
