@@ -217,53 +217,51 @@ public static class DamageTrackerMod
         return null;
     }
 
-    static Dictionary<ulong, int> CollectDoomDamage()
-    {
-        var result = new Dictionary<ulong, int>();
-        foreach (var pre in CombatManager.Instance.History.Entries.OfType<PowerReceivedEntry>())
-        {
-            if (pre.Power?.GetType().Name != "DoomPower") continue;
-            if (pre.Amount <= 0) continue;
-
-            var owner = ResolveOwnerPlayer(pre.Applier);
-            if (owner == null) continue;
-
-            result.TryGetValue(owner.NetId, out int existing);
-            result[owner.NetId] = existing + (int)pre.Amount;
-        }
-        return result;
-    }
-
-    static (int totalPoisonDmg, HashSet<ulong> poisonPlayerIds) CollectPoisonInfo()
+    /// <summary>
+    /// Collect indirect damage (Doom + Poison) that bypasses the normal dealer system.
+    /// Both are split evenly (floor) among all players who applied that power type.
+    /// </summary>
+    static (int totalDoom, HashSet<ulong> doomPlayerIds, int totalPoison, HashSet<ulong> poisonPlayerIds) CollectIndirectInfo()
     {
         var history = CombatManager.Instance.History.Entries;
 
-        int totalPoison = history
+        int totalDoom = 0;
+        var doomPlayerIds = new HashSet<ulong>();
+        int totalPoison = 0;
+        var poisonPlayerIds = new HashSet<ulong>();
+
+        foreach (var pre in history.OfType<PowerReceivedEntry>())
+        {
+            if (pre.Amount <= 0) continue;
+            var powerName = pre.Power?.GetType().Name;
+            var owner = ResolveOwnerPlayer(pre.Applier);
+
+            if (powerName == "DoomPower")
+            {
+                totalDoom += (int)pre.Amount;
+                if (owner != null) doomPlayerIds.Add(owner.NetId);
+            }
+            else if (powerName == "PoisonPower")
+            {
+                if (owner != null) poisonPlayerIds.Add(owner.NetId);
+            }
+        }
+
+        totalPoison = history
             .OfType<DamageReceivedEntry>()
             .Where(e => e.Dealer == null && e.Receiver is { IsMonster: true })
             .Sum(e => e.Result.TotalDamage);
 
-        var playerIds = new HashSet<ulong>();
-        foreach (var pre in history.OfType<PowerReceivedEntry>())
-        {
-            if (pre.Power?.GetType().Name != "PoisonPower") continue;
-            if (pre.Amount <= 0) continue;
-            var owner = ResolveOwnerPlayer(pre.Applier);
-            if (owner != null) playerIds.Add(owner.NetId);
-        }
-
-        return (totalPoison, playerIds);
+        return (totalDoom, doomPlayerIds, totalPoison, poisonPlayerIds);
     }
 
     static List<PlayerCombatStats> CollectCurrentStats()
     {
         var history = CombatManager.Instance.History.Entries;
-        var doomByPlayer = CollectDoomDamage();
-        var (totalPoisonDmg, poisonPlayerIds) = CollectPoisonInfo();
+        var (totalDoom, doomPlayerIds, totalPoison, poisonPlayerIds) = CollectIndirectInfo();
 
-        int poisonShare = poisonPlayerIds.Count > 0
-            ? totalPoisonDmg / poisonPlayerIds.Count
-            : 0;
+        int doomShare = doomPlayerIds.Count > 0 ? totalDoom / doomPlayerIds.Count : 0;
+        int poisonShare = poisonPlayerIds.Count > 0 ? totalPoison / poisonPlayerIds.Count : 0;
 
         var damageStats = history
             .OfType<DamageReceivedEntry>()
@@ -273,7 +271,7 @@ public static class DamageTrackerMod
             .ToDictionary(g => g.Key, g => g);
 
         var allPlayerIds = damageStats.Keys
-            .Union(doomByPlayer.Keys)
+            .Union(doomPlayerIds)
             .Union(poisonPlayerIds)
             .ToHashSet();
 
@@ -309,7 +307,7 @@ public static class DamageTrackerMod
                     catch { charClass = owner.Character.Id.Entry; }
                 }
 
-                doomByPlayer.TryGetValue(netId, out int doom);
+                int doom = doomPlayerIds.Contains(netId) ? doomShare : 0;
                 int poison = poisonPlayerIds.Contains(netId) ? poisonShare : 0;
                 int indirect = doom + poison;
 
