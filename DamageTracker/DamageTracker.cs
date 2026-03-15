@@ -7,6 +7,8 @@ using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Runs;
@@ -120,7 +122,8 @@ public static class DamageTrackerMod
 
             if (inCombat)
             {
-                int entryCount = cm.History.Entries.OfType<DamageReceivedEntry>().Count();
+                int entryCount = cm.History.Entries.OfType<DamageReceivedEntry>()
+                    .Count(e => ResolveOwnerPlayer(e.Dealer) != null);
                 if (entryCount > 0 && entryCount != _lastHistoryCount)
                 {
                     _lastHistoryCount = entryCount;
@@ -161,27 +164,36 @@ public static class DamageTrackerMod
         catch { return false; }
     }
 
+    static Player? ResolveOwnerPlayer(Creature? dealer)
+    {
+        if (dealer == null) return null;
+        if (dealer.IsPlayer) return dealer.Player;
+        if (dealer.IsPet) return dealer.PetOwner;
+        return null;
+    }
+
     static List<PlayerCombatStats> CollectCurrentStats()
     {
         return CombatManager.Instance.History.Entries
             .OfType<DamageReceivedEntry>()
-            .Where(e => e.Dealer is { IsPlayer: true })
-            .GroupBy(e => e.Dealer!.Player!.NetId)
+            .Select(e => (Entry: e, Owner: ResolveOwnerPlayer(e.Dealer)))
+            .Where(x => x.Owner != null)
+            .GroupBy(x => x.Owner!.NetId)
             .Select(g =>
             {
-                var player = g.First().Dealer!.Player!;
-                var displayName = g.First().Dealer!.Name;
+                var owner = g.First().Owner!;
+                string displayName = owner.Creature?.Name ?? "???";
                 string charClass;
-                try { charClass = player.Character.Title.GetFormattedText(); }
-                catch { charClass = player.Character.Id.Entry; }
+                try { charClass = owner.Character.Title.GetFormattedText(); }
+                catch { charClass = owner.Character.Id.Entry; }
 
                 return new PlayerCombatStats(
                     g.Key,
                     displayName,
                     charClass,
-                    g.Sum(e => e.Result.TotalDamage),
-                    g.Sum(e => e.Result.BlockedDamage),
-                    g.Count(e => e.Result.WasTargetKilled));
+                    g.Sum(x => x.Entry.Result.TotalDamage),
+                    g.Sum(x => x.Entry.Result.BlockedDamage),
+                    g.Count(x => x.Entry.Result.WasTargetKilled));
             })
             .OrderByDescending(s => s.Damage)
             .ToList();
